@@ -28,7 +28,6 @@ fn draw_screen_grid(cols: i32, rows: i32, color: Color) {
 /////////////////////////////////////////////////////////////////////////////////
 
 fn uprighted(rects: Vec<Rect>) -> Vec<Rect> {
-    println!("Uprighting...");
     rects
         .iter()
         .map(|r| {
@@ -42,7 +41,6 @@ fn uprighted(rects: Vec<Rect>) -> Vec<Rect> {
 }
 
 fn sorted(rects: Vec<Rect>, padding: f32) -> Vec<Rect> {
-    println!("Sorting...");
     let mut sorted_by_height = rects;
     sorted_by_height.sort_by(|a, b| b.h.partial_cmp(&a.h).unwrap());
 
@@ -59,7 +57,6 @@ fn sorted(rects: Vec<Rect>, padding: f32) -> Vec<Rect> {
 }
 
 fn flowed(rects: Vec<Rect>, padding: f32) -> Vec<Rect> {
-    println!("Flowing...padding: {}", padding);
     let mut current_y = padding;
     let mut current_x = padding;
     let mut row_height = 0f32;
@@ -199,7 +196,13 @@ async fn main() {
         }
 
         draw(step.rects(), DARKGRAY);
-        draw_text(format!("{}", step).as_str(), 20.0, screen_height() - 20., 30.0, DARKGRAY);
+        draw_text(
+            format!("{}", step).as_str(),
+            20.0,
+            screen_height() - 20.,
+            30.0,
+            DARKGRAY,
+        );
 
         next_frame().await
     }
