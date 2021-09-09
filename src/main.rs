@@ -194,8 +194,8 @@ impl Step {
 
 #[macroquad::main(conf)]
 async fn main() {
-    let rows = 8;
-    let cols = 8;
+    let rows = 4;
+    let cols = 4;
     let mut step = Step::new(cols, rows);
 
     loop {
