@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{borrow::Borrow, fmt::Display};
 
 use macroquad::prelude::*;
 
@@ -77,9 +77,30 @@ fn flowed(rects: Vec<Rect>, padding: f32) -> Vec<Rect> {
     result
 }
 
+fn find_intersections(rect: Rect, all:&Vec<Rect>) -> Vec<Rect> {
+    let mut result = Vec::new();
+    for r in all {
+        if r.overlaps(&rect) {
+            result.push(*r);
+        }
+    }
+    result
+}
+
 fn packed_upwards(rects: Vec<Rect>, padding: f32) -> Vec<Rect> {
-    println!("packed_upwards - unimplemented!");
-    rects
+    let mut result = Vec::new();
+
+    for rect in &rects {
+        // define a rect going from top of tjis rect to top of screen
+        let test = Rect::new(rect.x, 0., rect.w, rect.y - 1.);
+        let mut bottom:f32 = 0.;
+        for candidate in find_intersections(test, &result) {
+            bottom = bottom.max(candidate.bottom());
+        }
+        result.push(Rect::new(rect.x, bottom + padding, rect.w, rect.h));
+    }
+
+    result
 }
 
 fn draw(rects: &Vec<Rect>, color: Color) {
