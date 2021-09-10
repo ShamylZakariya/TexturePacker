@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, fmt::Display};
+use std::fmt::Display;
 
 use macroquad::prelude::*;
 
@@ -77,7 +77,7 @@ fn flowed(rects: Vec<Rect>, padding: f32) -> Vec<Rect> {
     result
 }
 
-fn find_intersections(rect: Rect, all:&Vec<Rect>) -> Vec<Rect> {
+fn find_intersections(rect: Rect, all: &[Rect]) -> Vec<Rect> {
     let mut result = Vec::new();
     for r in all {
         if r.overlaps(&rect) {
@@ -93,7 +93,7 @@ fn packed_upwards(rects: Vec<Rect>, padding: f32) -> Vec<Rect> {
     for rect in &rects {
         // define a rect going from top of tjis rect to top of screen
         let test = Rect::new(rect.x, 0., rect.w, rect.y - 1.);
-        let mut bottom:f32 = 0.;
+        let mut bottom: f32 = 0.;
         for candidate in find_intersections(test, &result) {
             bottom = bottom.max(candidate.bottom());
         }
@@ -103,7 +103,7 @@ fn packed_upwards(rects: Vec<Rect>, padding: f32) -> Vec<Rect> {
     result
 }
 
-fn draw(rects: &Vec<Rect>, color: Color) {
+fn draw(rects: &[Rect], color: Color) {
     for r in rects {
         draw_rectangle(r.x, r.y, r.w, r.h, color);
     }
@@ -159,10 +159,7 @@ impl Step {
     }
 
     fn is_done(&self) -> bool {
-        match *self {
-            Step::PackedUpwards(_) => true,
-            _ => false,
-        }
+        matches!(*self, Step::PackedUpwards(_))
     }
 
     fn next(self) -> Step {
@@ -194,8 +191,8 @@ impl Step {
 
 #[macroquad::main(conf)]
 async fn main() {
-    let rows = 4;
-    let cols = 4;
+    let rows = 6;
+    let cols = 3;
     let mut step = Step::new(cols, rows);
 
     loop {
