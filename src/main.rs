@@ -17,7 +17,12 @@ impl Patch {
             let half_height = self.bounds.h / 2.;
             let center_x = self.bounds.x + half_width;
             let center_y = self.bounds.y + half_height;
-            let new_rect = Rect::new(center_x - half_height, center_y - half_width, self.bounds.h, self.bounds.w);
+            let new_rect = Rect::new(
+                center_x - half_height,
+                center_y - half_width,
+                self.bounds.h,
+                self.bounds.w,
+            );
             Self {
                 id: self.id,
                 bounds: new_rect,
@@ -37,123 +42,15 @@ impl Patch {
     }
 }
 
-fn uprighted(patches: Vec<Patch>) -> Vec<Patch> {
-    patches.iter().map(|r| r.uprighted()).collect()
-}
-
-fn sorted(patches: Vec<Patch>, padding: f32) -> Vec<Patch> {
-    let mut sorted_by_height = patches;
-    sorted_by_height.sort_by(|a, b| b.bounds.h.partial_cmp(&a.bounds.h).unwrap());
-
-    let mut arranged_by_height: Vec<Patch> = Vec::new();
-    for patch in sorted_by_height {
-        arranged_by_height.push(if let Some(last) = arranged_by_height.last() {
-            patch.with_new_bounds(Rect::new(
-                last.bounds.right() + padding,
-                last.bounds.y,
-                patch.bounds.w,
-                patch.bounds.h,
-            ))
-        } else {
-            patch.with_new_bounds(Rect::new(padding, padding, patch.bounds.w, patch.bounds.h))
-        });
-    }
-
-    arranged_by_height
-}
-
-fn flowed(patches: Vec<Patch>, padding: f32) -> Vec<Patch> {
-    let mut current_y = padding;
-    let mut current_x = padding;
-    let mut row_height = 0f32;
-    let mut result: Vec<Patch> = Vec::new();
-
-    for patch in patches {
-        if current_x + patch.bounds.w > screen_width() {
-            current_x = padding;
-            current_y += row_height;
-            row_height = 0f32;
-        }
-
-        result.push(patch.with_new_bounds(Rect::new(
-            current_x,
-            current_y,
-            patch.bounds.w,
-            patch.bounds.h,
-        )));
-        current_x += patch.bounds.w + padding;
-        row_height = row_height.max(patch.bounds.h + padding);
-    }
-
-    result
-}
-
-fn find_intersections(bounds: Rect, all: &[Patch]) -> Vec<Patch> {
-    let mut result = Vec::new();
-    for p in all {
-        if p.bounds.overlaps(&bounds) {
-            result.push(*p);
-        }
-    }
-    result
-}
-
-fn packed_upwards(patches: Vec<Patch>, padding: f32) -> Vec<Patch> {
-    let mut result = Vec::new();
-
-    for patch in &patches {
-        // define a rect going from top of tjis rect to top of screen
-        let test = Rect::new(patch.bounds.x, 0., patch.bounds.w, patch.bounds.y - 1.);
-        let mut bottom: f32 = 0.;
-        for candidate in find_intersections(test, &result) {
-            bottom = bottom.max(candidate.bounds.bottom());
-        }
-        result.push(patch.with_new_bounds(Rect::new(
-            patch.bounds.x,
-            bottom + padding,
-            patch.bounds.w,
-            patch.bounds.h,
-        )));
-    }
-
-    result
-}
-
-fn draw(patches: &[Patch], color: Color) {
-    for patch in patches {
-        draw_rectangle(
-            patch.bounds.x,
-            patch.bounds.y,
-            patch.bounds.w,
-            patch.bounds.h,
-            color,
-        );
-    }
-}
+/////////////////////////////////////////////////////////////////////////////////
 
 #[derive(Clone)]
-enum Step {
-    Initial(Vec<Patch>),
-    Upright(Vec<Patch>),
-    Sorted(Vec<Patch>),
-    Flowed(Vec<Patch>),
-    PackedUpwards(Vec<Patch>),
+struct InitialState {
+    patches: Vec<Patch>,
 }
 
-impl Display for Step {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match *self {
-            Step::Initial(_) => write!(f, "Initial"),
-            Step::Upright(_) => write!(f, "Upright"),
-            Step::Sorted(_) => write!(f, "Sorted"),
-            Step::Flowed(_) => write!(f, "Flowed"),
-            Step::PackedUpwards(_) => write!(f, "PackedUpwards"),
-        }
-    }
-}
-
-impl Step {
-    fn new(cols: i32, rows: i32) -> Step {
+impl InitialState {
+    fn new(cols: i32, rows: i32) -> InitialState {
         let mut patches: Vec<Patch> = Vec::new();
         let cell_width = screen_width() / (cols as f32);
         let cell_height = screen_height() / (rows as f32);
@@ -177,30 +74,168 @@ impl Step {
             }
         }
 
-        Step::Initial(patches)
+        InitialState { patches }
+    }
+
+    fn next(&self) -> UprightedState {
+        UprightedState {
+            patches: self.patches.iter().map(|r| r.uprighted()).collect(),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct UprightedState {
+    patches: Vec<Patch>,
+}
+
+impl UprightedState {
+    fn next(&self, padding: f32) -> SortedByHeightState {
+        let mut sorted_by_height = self.patches.clone();
+        sorted_by_height.sort_by(|a, b| b.bounds.h.partial_cmp(&a.bounds.h).unwrap());
+
+        let mut arranged_by_height: Vec<Patch> = Vec::new();
+        for patch in sorted_by_height {
+            arranged_by_height.push(if let Some(last) = arranged_by_height.last() {
+                patch.with_new_bounds(Rect::new(
+                    last.bounds.right() + padding,
+                    last.bounds.y,
+                    patch.bounds.w,
+                    patch.bounds.h,
+                ))
+            } else {
+                patch.with_new_bounds(Rect::new(padding, padding, patch.bounds.w, patch.bounds.h))
+            });
+        }
+        SortedByHeightState {
+            patches: arranged_by_height,
+        }
+    }
+}
+
+#[derive(Clone)]
+struct SortedByHeightState {
+    patches: Vec<Patch>,
+}
+
+impl SortedByHeightState {
+    fn next(&self, padding: f32) -> FlowedState {
+        let mut current_y = padding;
+        let mut current_x = padding;
+        let mut row_height = 0f32;
+        let mut result: Vec<Patch> = Vec::new();
+
+        for patch in &self.patches {
+            if current_x + patch.bounds.w > screen_width() {
+                current_x = padding;
+                current_y += row_height;
+                row_height = 0f32;
+            }
+
+            result.push(patch.with_new_bounds(Rect::new(
+                current_x,
+                current_y,
+                patch.bounds.w,
+                patch.bounds.h,
+            )));
+            current_x += patch.bounds.w + padding;
+            row_height = row_height.max(patch.bounds.h + padding);
+        }
+
+        FlowedState { patches: result }
+    }
+}
+
+#[derive(Clone)]
+struct FlowedState {
+    patches: Vec<Patch>,
+}
+
+impl FlowedState {
+    fn next(&self, padding: f32) -> PackedUpwardsState {
+        let mut result = Vec::new();
+
+        for patch in &self.patches {
+            // define a rect going from top of tjis rect to top of screen
+            let test = Rect::new(patch.bounds.x, 0., patch.bounds.w, patch.bounds.y - 1.);
+            let mut bottom: f32 = 0.;
+            for candidate in Self::find_intersections(test, &result) {
+                bottom = bottom.max(candidate.bounds.bottom());
+            }
+            result.push(patch.with_new_bounds(Rect::new(
+                patch.bounds.x,
+                bottom + padding,
+                patch.bounds.w,
+                patch.bounds.h,
+            )));
+        }
+
+        PackedUpwardsState { patches: result }
+    }
+
+    fn find_intersections(bounds: Rect, among: &[Patch]) -> Vec<Patch> {
+        let mut result = Vec::new();
+        for p in among {
+            if p.bounds.overlaps(&bounds) {
+                result.push(*p);
+            }
+        }
+        result
+    }
+}
+
+#[derive(Clone)]
+struct PackedUpwardsState {
+    patches: Vec<Patch>,
+}
+
+#[derive(Clone)]
+enum State {
+    Initial(InitialState),
+    Upright(UprightedState),
+    Sorted(SortedByHeightState),
+    Flowed(FlowedState),
+    PackedUpwards(PackedUpwardsState),
+}
+
+impl Display for State {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            State::Initial(_) => write!(f, "Initial"),
+            State::Upright(_) => write!(f, "Upright"),
+            State::Sorted(_) => write!(f, "Sorted"),
+            State::Flowed(_) => write!(f, "Flowed"),
+            State::PackedUpwards(_) => write!(f, "PackedUpwards"),
+        }
+    }
+}
+
+impl State {
+    fn new(cols: i32, rows: i32) -> State {
+        State::Initial(InitialState::new(cols, rows))
     }
 
     fn is_done(&self) -> bool {
-        matches!(*self, Step::PackedUpwards(_))
+        matches!(*self, State::PackedUpwards(_))
     }
 
-    fn next(self) -> Step {
+    fn next(self) -> State {
         match self {
-            Step::Initial(rects) => Step::Upright(uprighted(rects)),
-            Step::Upright(rects) => Step::Sorted(sorted(rects, Self::padding())),
-            Step::Sorted(rects) => Step::Flowed(flowed(rects, Self::padding())),
-            Step::Flowed(rects) => Step::PackedUpwards(packed_upwards(rects, Self::padding())),
-            Step::PackedUpwards(_) => self.clone(),
+            State::Initial(state) => State::Upright(state.next()),
+            State::Upright(state) => State::Sorted(state.next(Self::padding())),
+            State::Sorted(state) => State::Flowed(state.next(Self::padding())),
+            State::Flowed(state) => State::PackedUpwards(state.next(Self::padding())),
+            State::PackedUpwards(_) => self.clone(),
         }
     }
 
     fn patches(&self) -> &Vec<Patch> {
         match self {
-            Step::Initial(patches) => patches,
-            Step::Upright(patches) => patches,
-            Step::Sorted(patches) => patches,
-            Step::Flowed(patches) => patches,
-            Step::PackedUpwards(patches) => patches,
+            State::Initial(state) => &state.patches,
+            State::Upright(state) => &state.patches,
+            State::Sorted(state) => &state.patches,
+            State::Flowed(state) => &state.patches,
+            State::PackedUpwards(state) => &state.patches,
         }
     }
 
@@ -232,11 +267,23 @@ fn draw_screen_grid(cols: i32, rows: i32, color: Color) {
     }
 }
 
+fn draw(patches: &[Patch], color: Color) {
+    for patch in patches {
+        draw_rectangle(
+            patch.bounds.x,
+            patch.bounds.y,
+            patch.bounds.w,
+            patch.bounds.h,
+            color,
+        );
+    }
+}
+
 #[macroquad::main(conf)]
 async fn main() {
     let rows = 6;
     let cols = 3;
-    let mut step = Step::new(cols, rows);
+    let mut step = State::new(cols, rows);
 
     loop {
         if is_key_pressed(KeyCode::Space) && !step.is_done() {
@@ -250,7 +297,7 @@ async fn main() {
         clear_background(WHITE);
 
         match &step {
-            Step::Initial(_) | Step::Upright(_) => {
+            State::Initial(_) | State::Upright(_) => {
                 draw_screen_grid(cols, rows, LIGHTGRAY);
             }
             _ => {}
