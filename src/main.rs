@@ -61,10 +61,10 @@ impl Patch {
     fn overlaps(&self, other: &Patch) -> bool {
         let (x_overlap, y_overlap) = {
             (
-                self.center.x <= other.center.x + other.extent.x
-                    && self.center.x + self.extent.x >= other.center.x,
-                self.center.y <= other.center.y + other.extent.y
-                    && self.center.y + self.extent.y >= other.center.y,
+                self.left() <= other.left() + other.width()
+                    && self.left() + self.width() >= other.left(),
+                self.top() <= other.top() + other.height()
+                    && self.top() + self.height() >= other.top(),
             )
         };
 
@@ -300,6 +300,13 @@ fn draw(patches: &[Patch], color: Color) {
             patch.width(),
             patch.height(),
             color,
+        );
+        draw_text(
+            format!("{}", patch.id).as_str(),
+            patch.center.x,
+            patch.center.y,
+            16.,
+            WHITE,
         );
     }
 }
