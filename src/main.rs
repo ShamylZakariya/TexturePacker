@@ -6,39 +6,64 @@ use std::fmt::Display;
 #[derive(Copy, Clone, Debug)]
 struct Patch {
     id: i32,
-    bounds: Rect,
-    uprighted: bool,
+    center: Vec2,
+    extent: Vec2,
+    rotation: f32,
 }
 
 impl Patch {
+    fn width(&self) -> f32 {
+        self.extent.x
+    }
+    fn height(&self) -> f32 {
+        self.extent.y
+    }
+    fn left(&self) -> f32 {
+        self.center.x - self.extent.x / 2.
+    }
+    fn right(&self) -> f32 {
+        self.center.x + self.extent.x / 2.
+    }
+    fn top(&self) -> f32 {
+        self.center.y - self.extent.y / 2.
+    }
+    fn bottom(&self) -> f32 {
+        self.center.y + self.extent.y / 2.
+    }
+
     fn uprighted(&self) -> Self {
-        if self.bounds.w > self.bounds.h {
-            let half_width = self.bounds.w / 2.;
-            let half_height = self.bounds.h / 2.;
-            let center_x = self.bounds.x + half_width;
-            let center_y = self.bounds.y + half_height;
-            let new_rect = Rect::new(
-                center_x - half_height,
-                center_y - half_width,
-                self.bounds.h,
-                self.bounds.w,
-            );
+        if self.width() > self.height() {
             Self {
                 id: self.id,
-                bounds: new_rect,
-                uprighted: true,
+                center: self.center,
+                extent: Vec2::new(self.extent.y, self.extent.x),
+                rotation: std::f32::consts::FRAC_PI_2,
             }
         } else {
             *self
         }
     }
 
-    fn with_new_bounds(&self, bounds: Rect) -> Self {
+    fn with_left_and_top(&self, left: f32, top: f32) -> Self {
         Self {
             id: self.id,
-            bounds,
-            uprighted: self.uprighted,
+            center: Vec2::new(left + self.extent.x / 2., top + self.extent.y / 2.),
+            extent: self.extent,
+            rotation: self.rotation,
         }
+    }
+
+    fn overlaps(&self, other: &Patch) -> bool {
+        let (x_overlap, y_overlap) = {
+            (
+                self.center.x <= other.center.x + other.extent.x
+                    && self.center.x + self.extent.x >= other.center.x,
+                self.center.y <= other.center.y + other.extent.y
+                    && self.center.y + self.extent.y >= other.center.y,
+            )
+        };
+
+        x_overlap && y_overlap
     }
 }
 
@@ -67,8 +92,9 @@ impl InitialState {
                 let center_y = (screen_height() * across_y) + (cell_height / 2.);
                 let patch = Patch {
                     id: patches.len() as i32,
-                    bounds: Rect::new(center_x - width / 2., center_y - height / 2., width, height),
-                    uprighted: false,
+                    center: Vec2::new(center_x, center_y),
+                    extent: Vec2::new(width, height),
+                    rotation: 0.,
                 };
                 patches.push(patch);
             }
@@ -92,19 +118,14 @@ struct UprightedState {
 impl UprightedState {
     fn next(&self, padding: f32) -> SortedByHeightState {
         let mut sorted_by_height = self.patches.clone();
-        sorted_by_height.sort_by(|a, b| b.bounds.h.partial_cmp(&a.bounds.h).unwrap());
+        sorted_by_height.sort_by(|a, b| b.height().partial_cmp(&a.height()).unwrap());
 
         let mut arranged_by_height: Vec<Patch> = Vec::new();
         for patch in sorted_by_height {
             arranged_by_height.push(if let Some(last) = arranged_by_height.last() {
-                patch.with_new_bounds(Rect::new(
-                    last.bounds.right() + padding,
-                    last.bounds.y,
-                    patch.bounds.w,
-                    patch.bounds.h,
-                ))
+                patch.with_left_and_top(last.right() + padding, padding)
             } else {
-                patch.with_new_bounds(Rect::new(padding, padding, patch.bounds.w, patch.bounds.h))
+                patch.with_left_and_top(padding, padding)
             });
         }
         SortedByHeightState {
@@ -126,20 +147,15 @@ impl SortedByHeightState {
         let mut result: Vec<Patch> = Vec::new();
 
         for patch in &self.patches {
-            if current_x + patch.bounds.w > screen_width() {
+            if current_x + patch.width() > screen_width() {
                 current_x = padding;
                 current_y += row_height;
                 row_height = 0f32;
             }
 
-            result.push(patch.with_new_bounds(Rect::new(
-                current_x,
-                current_y,
-                patch.bounds.w,
-                patch.bounds.h,
-            )));
-            current_x += patch.bounds.w + padding;
-            row_height = row_height.max(patch.bounds.h + padding);
+            result.push(patch.with_left_and_top(current_x, current_y));
+            current_x += patch.width() + padding;
+            row_height = row_height.max(patch.height() + padding);
         }
 
         FlowedState { patches: result }
@@ -156,27 +172,28 @@ impl FlowedState {
         let mut result = Vec::new();
 
         for patch in &self.patches {
-            // define a rect going from top of tjis rect to top of screen
-            let test = Rect::new(patch.bounds.x, 0., patch.bounds.w, patch.bounds.y - 1.);
+            // define a rect going from top of this rect to top of screen
+            let test = Patch {
+                id: -1,
+                center: Vec2::new(patch.center.x, (patch.top() - 1.) / 2.),
+                extent: Vec2::new(patch.width(), patch.top() - 1.),
+                rotation: 0.,
+            };
+
             let mut bottom: f32 = 0.;
             for candidate in Self::find_intersections(test, &result) {
-                bottom = bottom.max(candidate.bounds.bottom());
+                bottom = bottom.max(candidate.bottom());
             }
-            result.push(patch.with_new_bounds(Rect::new(
-                patch.bounds.x,
-                bottom + padding,
-                patch.bounds.w,
-                patch.bounds.h,
-            )));
+            result.push(patch.with_left_and_top(patch.left(), bottom + padding));
         }
 
         PackedUpwardsState { patches: result }
     }
 
-    fn find_intersections(bounds: Rect, among: &[Patch]) -> Vec<Patch> {
+    fn find_intersections(test: Patch, among: &[Patch]) -> Vec<Patch> {
         let mut result = Vec::new();
         for p in among {
-            if p.bounds.overlaps(&bounds) {
+            if p.overlaps(&test) {
                 result.push(*p);
             }
         }
@@ -270,10 +287,10 @@ fn draw_screen_grid(cols: i32, rows: i32, color: Color) {
 fn draw(patches: &[Patch], color: Color) {
     for patch in patches {
         draw_rectangle(
-            patch.bounds.x,
-            patch.bounds.y,
-            patch.bounds.w,
-            patch.bounds.h,
+            patch.left(),
+            patch.top(),
+            patch.width(),
+            patch.height(),
             color,
         );
     }
