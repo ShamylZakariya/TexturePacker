@@ -15,18 +15,23 @@ impl Patch {
     fn width(&self) -> f32 {
         self.extent.x
     }
+
     fn height(&self) -> f32 {
         self.extent.y
     }
+
     fn left(&self) -> f32 {
         self.center.x - self.extent.x / 2.
     }
+
     fn right(&self) -> f32 {
         self.center.x + self.extent.x / 2.
     }
+
     fn top(&self) -> f32 {
         self.center.y - self.extent.y / 2.
     }
+
     fn bottom(&self) -> f32 {
         self.center.y + self.extent.y / 2.
     }
@@ -102,12 +107,6 @@ impl InitialState {
 
         InitialState { patches }
     }
-
-    fn next(&self) -> UprightedState {
-        UprightedState {
-            patches: self.patches.iter().map(|r| r.uprighted()).collect(),
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -116,20 +115,9 @@ struct UprightedState {
 }
 
 impl UprightedState {
-    fn next(&self, padding: f32) -> SortedByHeightState {
-        let mut sorted_by_height = self.patches.clone();
-        sorted_by_height.sort_by(|a, b| b.height().partial_cmp(&a.height()).unwrap());
-
-        let mut arranged_by_height: Vec<Patch> = Vec::new();
-        for patch in sorted_by_height {
-            arranged_by_height.push(if let Some(last) = arranged_by_height.last() {
-                patch.with_left_and_top(last.right() + padding, padding)
-            } else {
-                patch.with_left_and_top(padding, padding)
-            });
-        }
-        SortedByHeightState {
-            patches: arranged_by_height,
+    fn from(state: InitialState) -> Self {
+        Self {
+            patches: state.patches.iter().map(|r| r.uprighted()).collect(),
         }
     }
 }
@@ -140,13 +128,37 @@ struct SortedByHeightState {
 }
 
 impl SortedByHeightState {
-    fn next(&self, padding: f32) -> FlowedState {
+    fn from(state: UprightedState, padding: f32) -> Self {
+        let mut sorted_by_height = state.patches;
+        sorted_by_height.sort_by(|a, b| b.height().partial_cmp(&a.height()).unwrap());
+
+        let mut arranged_by_height: Vec<Patch> = Vec::new();
+        for patch in sorted_by_height {
+            arranged_by_height.push(if let Some(last) = arranged_by_height.last() {
+                patch.with_left_and_top(last.right() + padding, padding)
+            } else {
+                patch.with_left_and_top(padding, padding)
+            });
+        }
+        Self {
+            patches: arranged_by_height,
+        }
+    }
+}
+
+#[derive(Clone)]
+struct FlowedState {
+    patches: Vec<Patch>,
+}
+
+impl FlowedState {
+    fn from(state: SortedByHeightState, padding: f32) -> Self {
         let mut current_y = padding;
         let mut current_x = padding;
         let mut row_height = 0f32;
         let mut result: Vec<Patch> = Vec::new();
 
-        for patch in &self.patches {
+        for patch in &state.patches {
             if current_x + patch.width() > screen_width() {
                 current_x = padding;
                 current_y += row_height;
@@ -158,25 +170,26 @@ impl SortedByHeightState {
             row_height = row_height.max(patch.height() + padding);
         }
 
-        FlowedState { patches: result }
+        Self { patches: result }
     }
 }
 
 #[derive(Clone)]
-struct FlowedState {
+struct PackedUpwardsState {
     patches: Vec<Patch>,
 }
 
-impl FlowedState {
-    fn next(&self, padding: f32) -> PackedUpwardsState {
+impl PackedUpwardsState {
+    fn from(state: FlowedState, padding: f32) -> Self {
         let mut result = Vec::new();
 
-        for patch in &self.patches {
+        for patch in &state.patches {
             // define a rect going from top of this rect to top of screen
+            let test_height = patch.top() - 1.;
             let test = Patch {
                 id: -1,
-                center: Vec2::new(patch.center.x, (patch.top() - 1.) / 2.),
-                extent: Vec2::new(patch.width(), patch.top() - 1.),
+                center: Vec2::new(patch.center.x, test_height / 2.),
+                extent: Vec2::new(patch.width(), test_height),
                 rotation: 0.,
             };
 
@@ -187,23 +200,12 @@ impl FlowedState {
             result.push(patch.with_left_and_top(patch.left(), bottom + padding));
         }
 
-        PackedUpwardsState { patches: result }
+        Self { patches: result }
     }
 
     fn find_intersections(test: Patch, among: &[Patch]) -> Vec<Patch> {
-        let mut result = Vec::new();
-        for p in among {
-            if p.overlaps(&test) {
-                result.push(*p);
-            }
-        }
-        result
+        among.iter().filter(|p| test.overlaps(p)).copied().collect()
     }
-}
-
-#[derive(Clone)]
-struct PackedUpwardsState {
-    patches: Vec<Patch>,
 }
 
 #[derive(Clone)]
@@ -238,10 +240,16 @@ impl State {
 
     fn next(self) -> State {
         match self {
-            State::Initial(state) => State::Upright(state.next()),
-            State::Upright(state) => State::Sorted(state.next(Self::padding())),
-            State::Sorted(state) => State::Flowed(state.next(Self::padding())),
-            State::Flowed(state) => State::PackedUpwards(state.next(Self::padding())),
+            State::Initial(state) => State::Upright(UprightedState::from(state)),
+            State::Upright(state) => {
+                State::Sorted(SortedByHeightState::from(state, Self::padding()))
+            }
+
+            State::Sorted(state) => State::Flowed(FlowedState::from(state, Self::padding())),
+            State::Flowed(state) => {
+                State::PackedUpwards(PackedUpwardsState::from(state, Self::padding()))
+            }
+
             State::PackedUpwards(_) => self.clone(),
         }
     }
