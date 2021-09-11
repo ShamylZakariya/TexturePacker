@@ -239,18 +239,13 @@ impl State {
     }
 
     fn next(self) -> State {
+        let padding = 4.;
         match self {
             State::Initial(state) => State::Upright(UprightedState::from(state)),
-            State::Upright(state) => {
-                State::Sorted(SortedByHeightState::from(state, Self::padding()))
-            }
-
-            State::Sorted(state) => State::Flowed(FlowedState::from(state, Self::padding())),
-            State::Flowed(state) => {
-                State::PackedUpwards(PackedUpwardsState::from(state, Self::padding()))
-            }
-
-            State::PackedUpwards(_) => self.clone(),
+            State::Upright(state) => State::Sorted(SortedByHeightState::from(state, padding)),
+            State::Sorted(state) => State::Flowed(FlowedState::from(state, padding)),
+            State::Flowed(state) => State::PackedUpwards(PackedUpwardsState::from(state, padding)),
+            State::PackedUpwards(_) => self,
         }
     }
 
@@ -262,10 +257,6 @@ impl State {
             State::Flowed(state) => &state.patches,
             State::PackedUpwards(state) => &state.patches,
         }
-    }
-
-    fn padding() -> f32 {
-        4.
     }
 }
 
