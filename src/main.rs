@@ -209,7 +209,7 @@ impl PackedUpwardsState {
 }
 
 #[derive(Clone)]
-enum State {
+enum Sequence {
     Initial(InitialState),
     Upright(UprightedState),
     Sorted(SortedByHeightState),
@@ -217,45 +217,41 @@ enum State {
     PackedUpwards(PackedUpwardsState),
 }
 
-impl Display for State {
+impl Display for Sequence {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
-            State::Initial(_) => write!(f, "Initial"),
-            State::Upright(_) => write!(f, "Upright"),
-            State::Sorted(_) => write!(f, "Sorted"),
-            State::Flowed(_) => write!(f, "Flowed"),
-            State::PackedUpwards(_) => write!(f, "PackedUpwards"),
+            Sequence::Initial(_) => write!(f, "Initial"),
+            Sequence::Upright(_) => write!(f, "Upright"),
+            Sequence::Sorted(_) => write!(f, "Sorted"),
+            Sequence::Flowed(_) => write!(f, "Flowed"),
+            Sequence::PackedUpwards(_) => write!(f, "PackedUpwards"),
         }
     }
 }
 
-impl State {
-    fn new(cols: i32, rows: i32) -> State {
-        State::Initial(InitialState::new(cols, rows))
+impl Sequence {
+    fn new(cols: i32, rows: i32) -> Sequence {
+        Sequence::Initial(InitialState::new(cols, rows))
     }
 
-    fn is_done(&self) -> bool {
-        matches!(*self, State::PackedUpwards(_))
-    }
-
-    fn next(self) -> State {
+    fn next(self) -> Sequence {
         let padding = 4.;
         match self {
-            State::Initial(state) => State::Upright(UprightedState::from(state)),
-            State::Upright(state) => State::Sorted(SortedByHeightState::from(state, padding)),
-            State::Sorted(state) => State::Flowed(FlowedState::from(state, padding)),
-            State::Flowed(state) => State::PackedUpwards(PackedUpwardsState::from(state, padding)),
-            State::PackedUpwards(_) => self,
+            Sequence::Initial(state) => Sequence::Upright(UprightedState::from(state)),
+            Sequence::Upright(state) => Sequence::Sorted(SortedByHeightState::from(state, padding)),
+            Sequence::Sorted(state) => Sequence::Flowed(FlowedState::from(state, padding)),
+            Sequence::Flowed(state) => Sequence::PackedUpwards(PackedUpwardsState::from(state, padding)),
+            Sequence::PackedUpwards(_) => self,
         }
     }
 
     fn patches(&self) -> &Vec<Patch> {
         match self {
-            State::Initial(state) => &state.patches,
-            State::Upright(state) => &state.patches,
-            State::Sorted(state) => &state.patches,
-            State::Flowed(state) => &state.patches,
-            State::PackedUpwards(state) => &state.patches,
+            Sequence::Initial(state) => &state.patches,
+            Sequence::Upright(state) => &state.patches,
+            Sequence::Sorted(state) => &state.patches,
+            Sequence::Flowed(state) => &state.patches,
+            Sequence::PackedUpwards(state) => &state.patches,
         }
     }
 }
@@ -343,16 +339,16 @@ fn draw_interpolated_patches(old_patches: &[Patch], new_patches: &[Patch], t: f3
 async fn main() {
     let rows = 6;
     let cols = 3;
-    let mut state = State::new(cols, rows);
+    let mut sequence = Sequence::new(cols, rows);
     let mut previous_patches = None;
-    let mut current_patches = state.patches().clone();
+    let mut current_patches = sequence.patches().clone();
     let mut last_step_time = None;
 
     loop {
-        if is_key_pressed(KeyCode::Space) && !state.is_done() {
+        if is_key_pressed(KeyCode::Space) {
             previous_patches = Some(current_patches.clone());
-            state = state.next();
-            current_patches = state.patches().clone();
+            sequence = sequence.next();
+            current_patches = sequence.patches().clone();
             last_step_time = Some(get_time());
         }
 
@@ -362,8 +358,8 @@ async fn main() {
 
         clear_background(WHITE);
 
-        match &state {
-            State::Initial(_) | State::Upright(_) => {
+        match &sequence {
+            Sequence::Initial(_) | Sequence::Upright(_) => {
                 draw_screen_grid(cols, rows, LIGHTGRAY);
             }
             _ => {}
@@ -385,7 +381,7 @@ async fn main() {
         }
 
         draw_text(
-            format!("{}", state).as_str(),
+            format!("{}", sequence).as_str(),
             20.0,
             screen_height() - 20.,
             30.0,
