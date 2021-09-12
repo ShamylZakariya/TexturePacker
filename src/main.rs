@@ -272,6 +272,20 @@ fn conf() -> Conf {
     }
 }
 
+fn ease(t: f32, b: f32, c: f32, d: f32) -> f32 {
+    let t = t / (d / 2.);
+    if t < 1. {
+        c / 2. * t * t * t + b
+    } else {
+        let t = t - 2.;
+        c / 2. * (t * t * t + 2.) + b
+    }
+}
+
+fn ease_unit(t: f32) -> f32 {
+    ease(t.clamp(0., 1.), 0., 1., 1.)
+}
+
 fn draw_screen_grid(cols: i32, rows: i32, color: Color) {
     for row in 0..rows {
         let y = ((row as f32) / (rows as f32)) * screen_height();
@@ -283,7 +297,7 @@ fn draw_screen_grid(cols: i32, rows: i32, color: Color) {
     }
 }
 
-fn draw(patches: &[Patch], color: Color) {
+fn draw_patches(patches: &[Patch], color: Color) {
     for patch in patches {
         draw_rectangle(
             patch.left(),
@@ -302,15 +316,44 @@ fn draw(patches: &[Patch], color: Color) {
     }
 }
 
+fn draw_interpolated_patches(old_patches: &[Patch], new_patches: &[Patch], t: f32, color: Color) {
+    let t = t.clamp(0., 1.);
+    let t = ease_unit(t);
+    for (old, current) in old_patches.iter().zip(new_patches.iter()) {
+        let center = old.center + t * (current.center - old.center);
+        let extent = old.extent + t * (current.extent - old.extent);
+        draw_rectangle(
+            center.x - extent.x / 2.,
+            center.y - extent.y / 2.,
+            extent.x,
+            extent.y,
+            color,
+        );
+        draw_text(
+            format!("{}", current.id).as_str(),
+            center.x,
+            center.y,
+            16.,
+            WHITE,
+        );
+    }
+}
+
 #[macroquad::main(conf)]
 async fn main() {
     let rows = 6;
     let cols = 3;
-    let mut step = State::new(cols, rows);
+    let mut state = State::new(cols, rows);
+    let mut previous_patches = None;
+    let mut current_patches = state.patches().clone();
+    let mut last_step_time = None;
 
     loop {
-        if is_key_pressed(KeyCode::Space) && !step.is_done() {
-            step = step.next();
+        if is_key_pressed(KeyCode::Space) && !state.is_done() {
+            previous_patches = Some(current_patches.clone());
+            state = state.next();
+            current_patches = state.patches().clone();
+            last_step_time = Some(get_time());
         }
 
         if is_key_pressed(KeyCode::Escape) {
@@ -319,16 +362,30 @@ async fn main() {
 
         clear_background(WHITE);
 
-        match &step {
+        match &state {
             State::Initial(_) | State::Upright(_) => {
                 draw_screen_grid(cols, rows, LIGHTGRAY);
             }
             _ => {}
         }
 
-        draw(step.patches(), DARKGRAY);
+        if let Some(last_step_time) = last_step_time {
+            if let Some(previous_patches) = &previous_patches {
+                let now = get_time();
+                let elapsed = now - last_step_time;
+                draw_interpolated_patches(
+                    previous_patches,
+                    &current_patches,
+                    elapsed as f32,
+                    DARKGRAY,
+                );
+            }
+        } else {
+            draw_patches(&current_patches, DARKGRAY);
+        }
+
         draw_text(
-            format!("{}", step).as_str(),
+            format!("{}", state).as_str(),
             20.0,
             screen_height() - 20.,
             30.0,
