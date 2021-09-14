@@ -84,15 +84,17 @@ impl InitialState {
         let mut patches: Vec<Patch> = Vec::new();
         let cell_width = screen_width() / (cols as f32);
         let cell_height = screen_height() / (rows as f32);
-        let min_width = cell_width * 0.1;
-        let min_height = cell_height * 0.1;
+        let max_width = cell_width * 1.1;
+        let max_height = cell_height * 1.1;
+        let min_width = cell_width * 0.5;
+        let min_height = cell_height * 0.5;
 
         for row in 0..rows {
             for col in 0..cols {
                 let across_x = (col as f32) / (cols as f32);
                 let across_y = (row as f32) / (rows as f32);
-                let width = rand::gen_range(min_width, cell_width);
-                let height = rand::gen_range(min_height, cell_height);
+                let width = rand::gen_range(min_width, max_width);
+                let height = rand::gen_range(min_height, max_height);
                 let center_x = (screen_width() * across_x) + (cell_width / 2.);
                 let center_y = (screen_height() * across_y) + (cell_height / 2.);
                 let patch = Patch {
@@ -157,17 +159,32 @@ impl FlowedState {
         let mut current_x = padding;
         let mut row_height = 0f32;
         let mut result: Vec<Patch> = Vec::new();
+        let mut row = 0;
 
         for patch in &state.patches {
-            if current_x + patch.width() > screen_width() {
-                current_x = padding;
-                current_y += row_height;
-                row_height = 0f32;
+            if row % 2 == 0 {
+                if current_x + patch.width() > screen_width() {
+                    current_x = screen_width() - padding - patch.width();
+                    current_y += row_height;
+                    row_height = 0f32;
+                    row += 1;
+                }
+            } else {
+                current_x -= patch.width() + padding;
+                if current_x < padding {
+                    current_x = padding;
+                    current_y += row_height;
+                    row_height = 0.;
+                    row += 1;
+                }
             }
 
             result.push(patch.with_left_and_top(current_x, current_y));
-            current_x += patch.width() + padding;
             row_height = row_height.max(patch.height() + padding);
+
+            if row % 2 == 0 {
+                current_x += patch.width() + padding;
+            }
         }
 
         Self { patches: result }
@@ -240,7 +257,9 @@ impl Sequence {
             Sequence::Initial(state) => Sequence::Upright(UprightedState::from(state)),
             Sequence::Upright(state) => Sequence::Sorted(SortedByHeightState::from(state, padding)),
             Sequence::Sorted(state) => Sequence::Flowed(FlowedState::from(state, padding)),
-            Sequence::Flowed(state) => Sequence::PackedUpwards(PackedUpwardsState::from(state, padding)),
+            Sequence::Flowed(state) => {
+                Sequence::PackedUpwards(PackedUpwardsState::from(state, padding))
+            }
             Sequence::PackedUpwards(_) => self,
         }
     }
@@ -343,6 +362,7 @@ async fn main() {
     let mut previous_patches = None;
     let mut current_patches = sequence.patches().clone();
     let mut last_step_time = None;
+    let patch_color: Color = [60, 60, 60, 128].into();
 
     loop {
         if is_key_pressed(KeyCode::Space) {
@@ -373,11 +393,11 @@ async fn main() {
                     previous_patches,
                     &current_patches,
                     elapsed as f32,
-                    DARKGRAY,
+                    patch_color,
                 );
             }
         } else {
-            draw_patches(&current_patches, DARKGRAY);
+            draw_patches(&current_patches, patch_color);
         }
 
         draw_text(
