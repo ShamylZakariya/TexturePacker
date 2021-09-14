@@ -1,7 +1,8 @@
 use macroquad::prelude::*;
-use std::fmt::Display;
 
 /////////////////////////////////////////////////////////////////////////////////
+
+const PADDING:f32 = 4.0;
 
 #[derive(Copy, Clone, Debug)]
 struct Patch {
@@ -74,6 +75,12 @@ impl Patch {
 
 /////////////////////////////////////////////////////////////////////////////////
 
+trait State {
+    fn name(&self) -> &'static str;
+    fn next(&self) -> Option<Box<dyn State>>;
+    fn patches(&self) -> &Vec<Patch>;
+}
+
 #[derive(Clone)]
 struct InitialState {
     patches: Vec<Patch>,
@@ -111,16 +118,44 @@ impl InitialState {
     }
 }
 
+impl State for InitialState {
+    fn name(&self) -> &'static str {
+        "Initial"
+    }
+
+    fn next(&self) -> Option<Box<dyn State>> {
+        Some(Box::new(UprightedState::from(self)))
+    }
+
+    fn patches(&self) -> &Vec<Patch> {
+        &self.patches
+    }
+}
+
 #[derive(Clone)]
 struct UprightedState {
     patches: Vec<Patch>,
 }
 
 impl UprightedState {
-    fn from(state: InitialState) -> Self {
+    fn from(state: &InitialState) -> Self {
         Self {
             patches: state.patches.iter().map(|r| r.uprighted()).collect(),
         }
+    }
+}
+
+impl State for UprightedState {
+    fn name(&self) -> &'static str {
+        "Uprighted"
+    }
+
+    fn next(&self) -> Option<Box<dyn State>> {
+        Some(Box::new(SortedByHeightState::from(self, PADDING)))
+    }
+
+    fn patches(&self) -> &Vec<Patch> {
+        &self.patches
     }
 }
 
@@ -130,8 +165,8 @@ struct SortedByHeightState {
 }
 
 impl SortedByHeightState {
-    fn from(state: UprightedState, padding: f32) -> Self {
-        let mut sorted_by_height = state.patches;
+    fn from(state: &UprightedState, padding: f32) -> Self {
+        let mut sorted_by_height = state.patches.clone();
         sorted_by_height.sort_by(|a, b| b.height().partial_cmp(&a.height()).unwrap());
 
         let mut arranged_by_height: Vec<Patch> = Vec::new();
@@ -148,13 +183,27 @@ impl SortedByHeightState {
     }
 }
 
+impl State for SortedByHeightState {
+    fn name(&self) -> &'static str {
+        "Sorted by Height"
+    }
+
+    fn next(&self) -> Option<Box<dyn State>> {
+        Some(Box::new(FlowedState::from(self, PADDING)))
+    }
+
+    fn patches(&self) -> &Vec<Patch> {
+        &self.patches
+    }
+}
+
 #[derive(Clone)]
 struct FlowedState {
     patches: Vec<Patch>,
 }
 
 impl FlowedState {
-    fn from(state: SortedByHeightState, padding: f32) -> Self {
+    fn from(state: &SortedByHeightState, padding: f32) -> Self {
         let mut current_y = padding;
         let mut current_x = padding;
         let mut row_height = 0f32;
@@ -191,13 +240,27 @@ impl FlowedState {
     }
 }
 
+impl State for FlowedState {
+    fn name(&self) -> &'static str {
+        "Flowed"
+    }
+
+    fn next(&self) -> Option<Box<dyn State>> {
+        Some(Box::new(PackedUpwardsState::from(self, PADDING)))
+    }
+
+    fn patches(&self) -> &Vec<Patch> {
+        &self.patches
+    }
+}
+
 #[derive(Clone)]
 struct PackedUpwardsState {
     patches: Vec<Patch>,
 }
 
 impl PackedUpwardsState {
-    fn from(state: FlowedState, padding: f32) -> Self {
+    fn from(state: &FlowedState, padding: f32) -> Self {
         let mut result = Vec::new();
 
         for patch in &state.patches {
@@ -225,53 +288,17 @@ impl PackedUpwardsState {
     }
 }
 
-#[derive(Clone)]
-enum Sequence {
-    Initial(InitialState),
-    Upright(UprightedState),
-    Sorted(SortedByHeightState),
-    Flowed(FlowedState),
-    PackedUpwards(PackedUpwardsState),
-}
-
-impl Display for Sequence {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match *self {
-            Sequence::Initial(_) => write!(f, "Initial"),
-            Sequence::Upright(_) => write!(f, "Upright"),
-            Sequence::Sorted(_) => write!(f, "Sorted"),
-            Sequence::Flowed(_) => write!(f, "Flowed"),
-            Sequence::PackedUpwards(_) => write!(f, "PackedUpwards"),
-        }
-    }
-}
-
-impl Sequence {
-    fn new(cols: i32, rows: i32) -> Sequence {
-        Sequence::Initial(InitialState::new(cols, rows))
+impl State for PackedUpwardsState {
+    fn name(&self) -> &'static str {
+        "Packed Upwards"
     }
 
-    fn next(self) -> Sequence {
-        let padding = 4.;
-        match self {
-            Sequence::Initial(state) => Sequence::Upright(UprightedState::from(state)),
-            Sequence::Upright(state) => Sequence::Sorted(SortedByHeightState::from(state, padding)),
-            Sequence::Sorted(state) => Sequence::Flowed(FlowedState::from(state, padding)),
-            Sequence::Flowed(state) => {
-                Sequence::PackedUpwards(PackedUpwardsState::from(state, padding))
-            }
-            Sequence::PackedUpwards(_) => self,
-        }
+    fn next(&self) -> Option<Box<dyn State>> {
+        None
     }
 
     fn patches(&self) -> &Vec<Patch> {
-        match self {
-            Sequence::Initial(state) => &state.patches,
-            Sequence::Upright(state) => &state.patches,
-            Sequence::Sorted(state) => &state.patches,
-            Sequence::Flowed(state) => &state.patches,
-            Sequence::PackedUpwards(state) => &state.patches,
-        }
+        &self.patches
     }
 }
 
@@ -358,18 +385,18 @@ fn draw_interpolated_patches(old_patches: &[Patch], new_patches: &[Patch], t: f3
 async fn main() {
     let rows = 6;
     let cols = 3;
-    let mut sequence = Sequence::new(cols, rows);
-    let mut previous_patches = None;
-    let mut current_patches = sequence.patches().clone();
+    let mut previous_state:Option<Box<dyn State>> = None;
+    let mut state:Box<dyn State> = Box::new(InitialState::new(cols, rows));
     let mut last_step_time = None;
     let patch_color: Color = [60, 60, 60, 128].into();
 
     loop {
         if is_key_pressed(KeyCode::Space) {
-            previous_patches = Some(current_patches.clone());
-            sequence = sequence.next();
-            current_patches = sequence.patches().clone();
-            last_step_time = Some(get_time());
+            if let Some(new_state) = state.next() {
+                previous_state = Some(state);
+                state = new_state;
+                last_step_time = Some(get_time());
+            }
         }
 
         if is_key_pressed(KeyCode::Escape) {
@@ -378,30 +405,30 @@ async fn main() {
 
         clear_background(WHITE);
 
-        match &sequence {
-            Sequence::Initial(_) | Sequence::Upright(_) => {
-                draw_screen_grid(cols, rows, LIGHTGRAY);
-            }
-            _ => {}
-        }
+        // match &sequence {
+        //     Sequence::Initial(_) | Sequence::Upright(_) => {
+        //         draw_screen_grid(cols, rows, LIGHTGRAY);
+        //     }
+        //     _ => {}
+        // }
 
         if let Some(last_step_time) = last_step_time {
-            if let Some(previous_patches) = &previous_patches {
+            if let Some(previous_state) = &previous_state {
                 let now = get_time();
                 let elapsed = now - last_step_time;
                 draw_interpolated_patches(
-                    previous_patches,
-                    &current_patches,
+                    previous_state.patches(),
+                    state.patches(),
                     elapsed as f32,
                     patch_color,
                 );
             }
         } else {
-            draw_patches(&current_patches, patch_color);
+            draw_patches(state.patches(), patch_color);
         }
 
         draw_text(
-            format!("{}", sequence).as_str(),
+            state.name(),
             20.0,
             screen_height() - 20.,
             30.0,
