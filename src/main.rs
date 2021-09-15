@@ -2,8 +2,6 @@ use macroquad::prelude::*;
 
 /////////////////////////////////////////////////////////////////////////////////
 
-const PADDING:f32 = 4.0;
-
 #[derive(Copy, Clone, Debug)]
 struct Patch {
     id: i32,
@@ -81,16 +79,23 @@ trait State {
     fn patches(&self) -> &Vec<Patch>;
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
+struct PackingConfig {
+    width: f32,
+    height: f32,
+    padding: f32,
+}
+
 struct InitialState {
     patches: Vec<Patch>,
+    config: PackingConfig,
 }
 
 impl InitialState {
-    fn new(cols: i32, rows: i32) -> InitialState {
+    fn new(config: PackingConfig, cols: i32, rows: i32) -> InitialState {
         let mut patches: Vec<Patch> = Vec::new();
-        let cell_width = screen_width() / (cols as f32);
-        let cell_height = screen_height() / (rows as f32);
+        let cell_width = config.width / (cols as f32);
+        let cell_height = config.height / (rows as f32);
         let max_width = cell_width * 1.1;
         let max_height = cell_height * 1.1;
         let min_width = cell_width * 0.5;
@@ -102,8 +107,8 @@ impl InitialState {
                 let across_y = (row as f32) / (rows as f32);
                 let width = rand::gen_range(min_width, max_width);
                 let height = rand::gen_range(min_height, max_height);
-                let center_x = (screen_width() * across_x) + (cell_width / 2.);
-                let center_y = (screen_height() * across_y) + (cell_height / 2.);
+                let center_x = (config.width * across_x) + (cell_width / 2.);
+                let center_y = (config.height * across_y) + (cell_height / 2.);
                 let patch = Patch {
                     id: patches.len() as i32,
                     center: Vec2::new(center_x, center_y),
@@ -114,7 +119,7 @@ impl InitialState {
             }
         }
 
-        InitialState { patches }
+        InitialState { patches, config }
     }
 }
 
@@ -135,12 +140,14 @@ impl State for InitialState {
 #[derive(Clone)]
 struct UprightedState {
     patches: Vec<Patch>,
+    config: PackingConfig,
 }
 
 impl UprightedState {
     fn from(state: &InitialState) -> Self {
         Self {
             patches: state.patches.iter().map(|r| r.uprighted()).collect(),
+            config: state.config,
         }
     }
 }
@@ -151,7 +158,7 @@ impl State for UprightedState {
     }
 
     fn next(&self) -> Option<Box<dyn State>> {
-        Some(Box::new(SortedByHeightState::from(self, PADDING)))
+        Some(Box::new(SortedByHeightState::from(self)))
     }
 
     fn patches(&self) -> &Vec<Patch> {
@@ -162,23 +169,25 @@ impl State for UprightedState {
 #[derive(Clone)]
 struct SortedByHeightState {
     patches: Vec<Patch>,
+    config: PackingConfig,
 }
 
 impl SortedByHeightState {
-    fn from(state: &UprightedState, padding: f32) -> Self {
+    fn from(state: &UprightedState) -> Self {
         let mut sorted_by_height = state.patches.clone();
         sorted_by_height.sort_by(|a, b| b.height().partial_cmp(&a.height()).unwrap());
 
         let mut arranged_by_height: Vec<Patch> = Vec::new();
         for patch in sorted_by_height {
             arranged_by_height.push(if let Some(last) = arranged_by_height.last() {
-                patch.with_left_and_top(last.right() + padding, padding)
+                patch.with_left_and_top(last.right() + state.config.padding, state.config.padding)
             } else {
-                patch.with_left_and_top(padding, padding)
+                patch.with_left_and_top(state.config.padding, state.config.padding)
             });
         }
         Self {
             patches: arranged_by_height,
+            config: state.config,
         }
     }
 }
@@ -189,7 +198,7 @@ impl State for SortedByHeightState {
     }
 
     fn next(&self) -> Option<Box<dyn State>> {
-        Some(Box::new(FlowedState::from(self, PADDING)))
+        Some(Box::new(FlowedState::from(self)))
     }
 
     fn patches(&self) -> &Vec<Patch> {
@@ -200,10 +209,12 @@ impl State for SortedByHeightState {
 #[derive(Clone)]
 struct FlowedState {
     patches: Vec<Patch>,
+    config: PackingConfig,
 }
 
 impl FlowedState {
-    fn from(state: &SortedByHeightState, padding: f32) -> Self {
+    fn from(state: &SortedByHeightState) -> Self {
+        let padding = state.config.padding;
         let mut current_y = padding;
         let mut current_x = padding;
         let mut row_height = 0f32;
@@ -212,8 +223,8 @@ impl FlowedState {
 
         for patch in &state.patches {
             if row % 2 == 0 {
-                if current_x + patch.width() > screen_width() {
-                    current_x = screen_width() - padding - patch.width();
+                if current_x + patch.width() > state.config.width {
+                    current_x = state.config.width - padding - patch.width();
                     current_y += row_height;
                     row_height = 0f32;
                     row += 1;
@@ -236,7 +247,10 @@ impl FlowedState {
             }
         }
 
-        Self { patches: result }
+        Self {
+            patches: result,
+            config: state.config,
+        }
     }
 }
 
@@ -246,7 +260,7 @@ impl State for FlowedState {
     }
 
     fn next(&self) -> Option<Box<dyn State>> {
-        Some(Box::new(PackedUpwardsState::from(self, PADDING)))
+        Some(Box::new(PackedUpwardsState::from(self)))
     }
 
     fn patches(&self) -> &Vec<Patch> {
@@ -257,10 +271,11 @@ impl State for FlowedState {
 #[derive(Clone)]
 struct PackedUpwardsState {
     patches: Vec<Patch>,
+    config: PackingConfig,
 }
 
 impl PackedUpwardsState {
-    fn from(state: &FlowedState, padding: f32) -> Self {
+    fn from(state: &FlowedState) -> Self {
         let mut result = Vec::new();
 
         for patch in &state.patches {
@@ -277,10 +292,13 @@ impl PackedUpwardsState {
             for candidate in Self::find_intersections(test, &result) {
                 bottom = bottom.max(candidate.bottom());
             }
-            result.push(patch.with_left_and_top(patch.left(), bottom + padding));
+            result.push(patch.with_left_and_top(patch.left(), bottom + state.config.padding));
         }
 
-        Self { patches: result }
+        Self {
+            patches: result,
+            config: state.config,
+        }
     }
 
     fn find_intersections(test: Patch, among: &[Patch]) -> Vec<Patch> {
@@ -326,17 +344,6 @@ fn ease(t: f32, b: f32, c: f32, d: f32) -> f32 {
 
 fn ease_unit(t: f32) -> f32 {
     ease(t.clamp(0., 1.), 0., 1., 1.)
-}
-
-fn draw_screen_grid(cols: i32, rows: i32, color: Color) {
-    for row in 0..rows {
-        let y = ((row as f32) / (rows as f32)) * screen_height();
-        draw_line(0.0, y, screen_width(), y, 1.0, color);
-    }
-    for col in 0..cols {
-        let x = ((col as f32) / (cols as f32)) * screen_width();
-        draw_line(x, 0.0, x, screen_height(), 1.0, color);
-    }
 }
 
 fn draw_patches(patches: &[Patch], color: Color) {
@@ -385,8 +392,13 @@ fn draw_interpolated_patches(old_patches: &[Patch], new_patches: &[Patch], t: f3
 async fn main() {
     let rows = 6;
     let cols = 3;
-    let mut previous_state:Option<Box<dyn State>> = None;
-    let mut state:Box<dyn State> = Box::new(InitialState::new(cols, rows));
+    let config = PackingConfig {
+        width: screen_width(),
+        height: screen_height(),
+        padding: 4.,
+    };
+    let mut previous_state: Option<Box<dyn State>> = None;
+    let mut state: Box<dyn State> = Box::new(InitialState::new(config, cols, rows));
     let mut last_step_time = None;
     let patch_color: Color = [60, 60, 60, 128].into();
 
@@ -405,13 +417,6 @@ async fn main() {
 
         clear_background(WHITE);
 
-        // match &sequence {
-        //     Sequence::Initial(_) | Sequence::Upright(_) => {
-        //         draw_screen_grid(cols, rows, LIGHTGRAY);
-        //     }
-        //     _ => {}
-        // }
-
         if let Some(last_step_time) = last_step_time {
             if let Some(previous_state) = &previous_state {
                 let now = get_time();
@@ -427,13 +432,7 @@ async fn main() {
             draw_patches(state.patches(), patch_color);
         }
 
-        draw_text(
-            state.name(),
-            20.0,
-            screen_height() - 20.,
-            30.0,
-            DARKGRAY,
-        );
+        draw_text(state.name(), 20.0, screen_height() - 20., 30.0, DARKGRAY);
 
         next_frame().await
     }
