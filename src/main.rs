@@ -143,7 +143,7 @@ struct UprightedState {
     config: PackingConfig,
 }
 
-impl UprightedState {
+impl From<&InitialState> for UprightedState {
     fn from(state: &InitialState) -> Self {
         Self {
             patches: state.patches.iter().map(|r| r.uprighted()).collect(),
@@ -172,7 +172,7 @@ struct SortedByHeightState {
     config: PackingConfig,
 }
 
-impl SortedByHeightState {
+impl From<&UprightedState> for SortedByHeightState {
     fn from(state: &UprightedState) -> Self {
         let mut sorted_by_height = state.patches.clone();
         sorted_by_height.sort_by(|a, b| b.height().partial_cmp(&a.height()).unwrap());
@@ -212,7 +212,7 @@ struct FlowedState {
     config: PackingConfig,
 }
 
-impl FlowedState {
+impl From<&SortedByHeightState> for FlowedState {
     fn from(state: &SortedByHeightState) -> Self {
         let padding = state.config.padding;
         let mut current_y = padding;
@@ -274,7 +274,7 @@ struct PackedUpwardsState {
     config: PackingConfig,
 }
 
-impl PackedUpwardsState {
+impl From<&FlowedState> for PackedUpwardsState {
     fn from(state: &FlowedState) -> Self {
         let mut result = Vec::new();
 
@@ -300,7 +300,9 @@ impl PackedUpwardsState {
             config: state.config,
         }
     }
+}
 
+impl PackedUpwardsState {
     fn find_intersections(test: Patch, among: &[Patch]) -> Vec<Patch> {
         among.iter().filter(|p| test.overlaps(p)).copied().collect()
     }
